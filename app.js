@@ -67,6 +67,7 @@
   });
 
   // ══════════ Admin Panel Open/Close ══════════
+  //--==== جهت تست
 
   window.openAdmin = function () {
     // اگر لاگین اولیه انجام نشده، modal ورود را نشان بده نه پنل ادمین
@@ -401,7 +402,7 @@
         src: p.src,
         preview: p.src,
         title: p.title || "",
-        status: "existing",          // نوع: فراخوانی‌شده از کلودینری
+        status: "existing", // نوع: فراخوانی‌شده از کلودینری
         srcOcc: occ,
         srcEventIdx: eventIdx,
       };
@@ -409,7 +410,9 @@
 
     if (apQueue.length === 0) {
       const grid = document.getElementById("adminPhotoGrid");
-      if (grid) grid.innerHTML = '<p style="color:#a07850;font-size:0.85rem;padding:8px">این رویداد هنوز عکسی ندارد</p>';
+      if (grid)
+        grid.innerHTML =
+          '<p style="color:#a07850;font-size:0.85rem;padding:8px">این رویداد هنوز عکسی ندارد</p>';
       apToast(`رویداد "${event.label}" — بدون عکس`);
       return;
     }
@@ -562,49 +565,54 @@
     if (!occ) return apToast("⚠️ ابتدا مناسبت را انتخاب کنید");
     if (eventIdx === "") return apToast("⚠️ ابتدا رویداد را انتخاب کنید");
 
-    const toProcess = apQueue.filter((p) => p.status === "pending" || p.status === "existing");
+    const toProcess = apQueue.filter(
+      (p) => p.status === "pending" || p.status === "existing",
+    );
     if (!toProcess.length) return apToast("هیچ عکسی در صف وجود ندارد");
 
     // برای existing‌ها بررسی کن که مقصد با مبدأ فرق داشته باشه
     const existingPhotos = toProcess.filter((p) => p.status === "existing");
-    const pendingPhotos  = toProcess.filter((p) => p.status === "pending");
+    const pendingPhotos = toProcess.filter((p) => p.status === "pending");
 
     if (existingPhotos.length > 0) {
       // همه existing‌ها باید از یک رویداد مبدأ باشند
-      const srcOcc      = existingPhotos[0].srcOcc;
+      const srcOcc = existingPhotos[0].srcOcc;
       const srcEventIdx = existingPhotos[0].srcEventIdx;
       if (srcOcc === occ && String(srcEventIdx) === String(eventIdx)) {
-        return apToast("⚠️ مبدأ و مقصد یکسان است — مناسبت/رویداد مقصد را تغییر دهید");
+        return apToast(
+          "⚠️ مبدأ و مقصد یکسان است — مناسبت/رویداد مقصد را تغییر دهید",
+        );
       }
     }
 
     // برای pending‌ها کلودینری لازم است
     if (pendingPhotos.length > 0) {
       const cloudName = cfg("cloudName");
-      const preset    = cfg("preset");
+      const preset = cfg("preset");
       if (!cloudName) return apToast("Cloud Name تنظیم نشده");
-      if (!preset)    return apToast("Upload Preset تنظیم نشده");
+      if (!preset) return apToast("Upload Preset تنظیم نشده");
     }
 
-    const progressWrap  = document.getElementById("uploadProgressWrap");
-    const progressBar   = document.getElementById("uploadProgressBar");
+    const progressWrap = document.getElementById("uploadProgressWrap");
+    const progressBar = document.getElementById("uploadProgressBar");
     const progressLabel = document.getElementById("uploadProgressLabel");
-    const statusEl      = document.getElementById("statusMessage");
+    const statusEl = document.getElementById("statusMessage");
 
     progressWrap.style.display = "block";
     progressBar.style.width = "0%";
-    let done = 0, total = toProcess.length;
-    let successCount = 0, errorCount = 0;
+    let done = 0,
+      total = toProcess.length;
+    let successCount = 0,
+      errorCount = 0;
 
     for (const photo of toProcess) {
-
       // ── حالت ۱: عکس فراخوانی‌شده — فقط لینک منتقل می‌شود ──
       if (photo.status === "existing") {
         progressLabel.textContent = `انتقال ${done + 1} از ${total}: ${photo.title}`;
 
-        const srcOcc      = photo.srcOcc;
+        const srcOcc = photo.srcOcc;
         const srcEventIdx = photo.srcEventIdx;
-        const srcArr      = DATA[srcOcc]?.[srcEventIdx]?.photos;
+        const srcArr = DATA[srcOcc]?.[srcEventIdx]?.photos;
 
         // ثبت در مقصد
         if (!DATA[occ][eventIdx].photos) DATA[occ][eventIdx].photos = [];
@@ -619,7 +627,7 @@
         photo.status = "done";
         successCount++;
 
-      // ── حالت ۲: عکس جدید — آپلود واقعی به کلودینری ──
+        // ── حالت ۲: عکس جدید — آپلود واقعی به کلودینری ──
       } else if (photo.status === "pending") {
         photo.status = "uploading";
         renderAdminPhotoGrid();
@@ -630,13 +638,16 @@
           formData.append("upload_preset", cfg("preset"));
           formData.append("context", `caption=${photo.title}`);
 
-          const res  = await fetch(
+          const res = await fetch(
             `https://api.cloudinary.com/v1_1/${cfg("cloudName")}/image/upload`,
             { method: "POST", body: formData },
           );
           const data = await res.json();
           if (data.secure_url) {
-            DATA[occ][eventIdx].photos.push({ src: data.secure_url, title: photo.title });
+            DATA[occ][eventIdx].photos.push({
+              src: data.secure_url,
+              title: photo.title,
+            });
             photo.status = "done";
             successCount++;
           } else {
@@ -657,23 +668,28 @@
     }
 
     const hadExisting = existingPhotos.length > 0;
-    const hadPending  = pendingPhotos.length > 0;
+    const hadPending = pendingPhotos.length > 0;
 
-    progressLabel.textContent = hadExisting && !hadPending ? "انتقال تمام شد" : "آپلود تمام شد";
+    progressLabel.textContent =
+      hadExisting && !hadPending ? "انتقال تمام شد" : "آپلود تمام شد";
     statusEl.textContent =
       (hadExisting ? `✅ ${existingPhotos.length} عکس منتقل شد` : "") +
-      (hadPending  ? ` ✅ ${pendingPhotos.filter(p=>p.status==="done").length} عکس آپلود شد` : "") +
-      (errorCount  ? ` — ❌ ${errorCount} خطا` : "");
+      (hadPending
+        ? ` ✅ ${pendingPhotos.filter((p) => p.status === "done").length} عکس آپلود شد`
+        : "") +
+      (errorCount ? ` — ❌ ${errorCount} خطا` : "");
 
     apToast(
       hadExisting && !hadPending
         ? `✅ ${successCount} عکس با موفقیت منتقل شد`
-        : `✅ ${successCount} عکس با موفقیت انجام شد`
+        : `✅ ${successCount} عکس با موفقیت انجام شد`,
     );
 
     apQueue = [];
     renderAdminPhotoGrid();
-    setTimeout(() => { progressWrap.style.display = "none"; }, 2000);
+    setTimeout(() => {
+      progressWrap.style.display = "none";
+    }, 2000);
     downloadUpdatedIndex();
   };
 
