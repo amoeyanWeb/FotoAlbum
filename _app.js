@@ -393,29 +393,33 @@
     if (!event) return apToast("رویداد پیدا نشد");
     const photos = event.photos || [];
 
-    // عکس‌های فراخوانی‌شده را به apQueue با نوع existing می‌ریزیم
-    // تا دکمه آپلود بتواند آن‌ها را بدون re-upload انتقال دهد
-    apQueue = photos.map(function (p) {
-      return {
-        id: "ex_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
-        src: p.src,
-        preview: p.src,
-        title: p.title || "",
-        status: "existing",          // نوع: فراخوانی‌شده از کلودینری
-        srcOcc: occ,
-        srcEventIdx: eventIdx,
-      };
-    });
+    apQueue = [];
+    const grid = document.getElementById("adminPhotoGrid");
+    if (!grid) return;
 
-    if (apQueue.length === 0) {
-      const grid = document.getElementById("adminPhotoGrid");
-      if (grid) grid.innerHTML = '<p style="color:#a07850;font-size:0.85rem;padding:8px">این رویداد هنوز عکسی ندارد</p>';
+    if (photos.length === 0) {
+      grid.innerHTML =
+        '<p style="color:#a07850;font-size:0.85rem;padding:8px">این رویداد هنوز عکسی ندارد</p>';
       apToast(`رویداد "${event.label}" — بدون عکس`);
       return;
     }
 
-    renderAdminPhotoGrid();
-    apToast(`✅ رویداد "${event.label}" — ${apQueue.length} عکس`);
+    grid.innerHTML = photos
+      .map(
+        (p, i) => `
+      <div class="apg-item" id="existing-${i}">
+        <div class="apg-badge apg-done">✓</div>
+        <img src="${p.src}" alt="${p.title}" loading="lazy">
+        <input class="apg-title" type="text" value="${(p.title || "").replace(/"/g, "&quot;")}"
+          placeholder="عنوان عکس"
+          onchange="updateExistingPhotoTitle('${occ}',${eventIdx},${i},this.value)">
+        <button class="apg-del" onclick="deleteExistingPhoto('${occ}',${eventIdx},${i})" title="حذف">🗑</button>
+      </div>
+    `,
+      )
+      .join("");
+
+    apToast(`✅ رویداد "${event.label}" — ${photos.length} عکس`);
   };
 
   window.updateExistingPhotoTitle = function (
@@ -523,15 +527,13 @@
     grid.innerHTML = apQueue
       .map((p) => {
         const s =
-          p.status === "existing"
+          p.status === "done"
             ? '<div class="apg-badge apg-done">✓</div>'
-            : p.status === "done"
-              ? '<div class="apg-badge apg-done">✓</div>'
-              : p.status === "uploading"
-                ? '<div class="apg-badge apg-uploading">↑</div>'
-                : p.status === "error"
-                  ? '<div class="apg-badge apg-error">✗</div>'
-                  : "";
+            : p.status === "uploading"
+              ? '<div class="apg-badge apg-uploading">↑</div>'
+              : p.status === "error"
+                ? '<div class="apg-badge apg-error">✗</div>'
+                : "";
         return `<div class="apg-item" id="apgitem-${p.id}">${s}<img src="${p.preview}" alt=""><input class="apg-title" type="text" value="${p.title.replace(/"/g, "&quot;")}" placeholder="عنوان عکس" onchange="updatePhotoTitle('${p.id}',this.value)"><button class="apg-del" onclick="removeFromQueue('${p.id}')" title="حذف">🗑</button></div>`;
       })
       .join("");
@@ -562,118 +564,71 @@
     if (!occ) return apToast("⚠️ ابتدا مناسبت را انتخاب کنید");
     if (eventIdx === "") return apToast("⚠️ ابتدا رویداد را انتخاب کنید");
 
-    const toProcess = apQueue.filter((p) => p.status === "pending" || p.status === "existing");
-    if (!toProcess.length) return apToast("هیچ عکسی در صف وجود ندارد");
+    const pending = apQueue.filter((p) => p.status === "pending");
+    if (!pending.length) return apToast("هیچ عکسی در صف آپلود وجود ندارد");
 
-    // برای existing‌ها بررسی کن که مقصد با مبدأ فرق داشته باشه
-    const existingPhotos = toProcess.filter((p) => p.status === "existing");
-    const pendingPhotos  = toProcess.filter((p) => p.status === "pending");
+    const cloudName = cfg("cloudName");
+    const preset = cfg("preset");
+    if (!cloudName) return apToast("Cloud Name تنظیم نشده");
+    if (!preset) return apToast("Upload Preset تنظیم نشده");
 
-    if (existingPhotos.length > 0) {
-      // همه existing‌ها باید از یک رویداد مبدأ باشند
-      const srcOcc      = existingPhotos[0].srcOcc;
-      const srcEventIdx = existingPhotos[0].srcEventIdx;
-      if (srcOcc === occ && String(srcEventIdx) === String(eventIdx)) {
-        return apToast("⚠️ مبدأ و مقصد یکسان است — مناسبت/رویداد مقصد را تغییر دهید");
-      }
-    }
-
-    // برای pending‌ها کلودینری لازم است
-    if (pendingPhotos.length > 0) {
-      const cloudName = cfg("cloudName");
-      const preset    = cfg("preset");
-      if (!cloudName) return apToast("Cloud Name تنظیم نشده");
-      if (!preset)    return apToast("Upload Preset تنظیم نشده");
-    }
-
-    const progressWrap  = document.getElementById("uploadProgressWrap");
-    const progressBar   = document.getElementById("uploadProgressBar");
+    const progressWrap = document.getElementById("uploadProgressWrap");
+    const progressBar = document.getElementById("uploadProgressBar");
     const progressLabel = document.getElementById("uploadProgressLabel");
-    const statusEl      = document.getElementById("statusMessage");
+    const statusEl = document.getElementById("statusMessage");
 
     progressWrap.style.display = "block";
     progressBar.style.width = "0%";
-    let done = 0, total = toProcess.length;
-    let successCount = 0, errorCount = 0;
+    let done = 0,
+      total = pending.length;
 
-    for (const photo of toProcess) {
+    for (const photo of pending) {
+      photo.status = "uploading";
+      renderAdminPhotoGrid();
+      progressLabel.textContent = `آپلود ${done + 1} از ${total}: ${photo.title}`;
+      try {
+        const formData = new FormData();
+        formData.append("file", photo.file);
+        formData.append("upload_preset", preset);
+        formData.append("context", `caption=${photo.title}`);
 
-      // ── حالت ۱: عکس فراخوانی‌شده — فقط لینک منتقل می‌شود ──
-      if (photo.status === "existing") {
-        progressLabel.textContent = `انتقال ${done + 1} از ${total}: ${photo.title}`;
-
-        const srcOcc      = photo.srcOcc;
-        const srcEventIdx = photo.srcEventIdx;
-        const srcArr      = DATA[srcOcc]?.[srcEventIdx]?.photos;
-
-        // ثبت در مقصد
-        if (!DATA[occ][eventIdx].photos) DATA[occ][eventIdx].photos = [];
-        DATA[occ][eventIdx].photos.push({ src: photo.src, title: photo.title });
-
-        // حذف از مبدأ
-        if (srcArr) {
-          const idx = srcArr.findIndex((x) => x.src === photo.src);
-          if (idx !== -1) srcArr.splice(idx, 1);
-        }
-
-        photo.status = "done";
-        successCount++;
-
-      // ── حالت ۲: عکس جدید — آپلود واقعی به کلودینری ──
-      } else if (photo.status === "pending") {
-        photo.status = "uploading";
-        renderAdminPhotoGrid();
-        progressLabel.textContent = `آپلود ${done + 1} از ${total}: ${photo.title}`;
-        try {
-          const formData = new FormData();
-          formData.append("file", photo.file);
-          formData.append("upload_preset", cfg("preset"));
-          formData.append("context", `caption=${photo.title}`);
-
-          const res  = await fetch(
-            `https://api.cloudinary.com/v1_1/${cfg("cloudName")}/image/upload`,
-            { method: "POST", body: formData },
-          );
-          const data = await res.json();
-          if (data.secure_url) {
-            DATA[occ][eventIdx].photos.push({ src: data.secure_url, title: photo.title });
-            photo.status = "done";
-            successCount++;
-          } else {
-            photo.status = "error";
-            errorCount++;
-            console.error("Cloudinary error:", data);
-          }
-        } catch (err) {
+        const res = await fetch(
+          `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+          { method: "POST", body: formData },
+        );
+        const data = await res.json();
+        if (data.secure_url) {
+          DATA[occ][eventIdx].photos.push({
+            src: data.secure_url,
+          });
+          photo.status = "done";
+        } else {
           photo.status = "error";
-          errorCount++;
-          console.error("Upload failed:", err);
+          console.error("Cloudinary error:", data);
         }
+      } catch (err) {
+        photo.status = "error";
+        console.error("Upload failed:", err);
       }
-
       done++;
       progressBar.style.width = Math.round((done / total) * 100) + "%";
       renderAdminPhotoGrid();
     }
 
-    const hadExisting = existingPhotos.length > 0;
-    const hadPending  = pendingPhotos.length > 0;
+    const successCount = apQueue.filter((p) => p.status === "done").length;
+    const errorCount = apQueue.filter((p) => p.status === "error").length;
 
-    progressLabel.textContent = hadExisting && !hadPending ? "انتقال تمام شد" : "آپلود تمام شد";
+    progressLabel.textContent = "آپلود تمام شد";
     statusEl.textContent =
-      (hadExisting ? `✅ ${existingPhotos.length} عکس منتقل شد` : "") +
-      (hadPending  ? ` ✅ ${pendingPhotos.filter(p=>p.status==="done").length} عکس آپلود شد` : "") +
-      (errorCount  ? ` — ❌ ${errorCount} خطا` : "");
-
-    apToast(
-      hadExisting && !hadPending
-        ? `✅ ${successCount} عکس با موفقیت منتقل شد`
-        : `✅ ${successCount} عکس با موفقیت انجام شد`
-    );
+      `✅ ${successCount} عکس آپلود شد` +
+      (errorCount ? ` — ❌ ${errorCount} خطا` : "");
+    apToast(`✅ ${successCount} عکس با موفقیت آپلود شد`);
 
     apQueue = [];
     renderAdminPhotoGrid();
-    setTimeout(() => { progressWrap.style.display = "none"; }, 2000);
+    setTimeout(() => {
+      progressWrap.style.display = "none";
+    }, 2000);
     downloadUpdatedIndex();
   };
 
@@ -737,28 +692,31 @@
     t._tid = setTimeout(() => t.classList.remove("show"), 4000);
   };
 
-  // ══════════ Download Updated HTML ══════════
+  // ══════════ Download Updated data.js ══════════
 
   function downloadUpdatedIndex() {
+    downloadUpdatedData();
+  }
+
+  function downloadUpdatedData() {
     const progressLabel = document.getElementById("uploadProgressLabel");
     if (progressLabel) progressLabel.textContent = "";
     const statusEl = document.getElementById("statusMessage");
     if (statusEl) statusEl.textContent = "";
 
-    let html = document.documentElement.outerHTML;
-    html = html.replace(
-      /var DATA = {[\s\S]*?};(?=\s*\n\s*(\/\/|var LABELS|let LABELS))/g,
-      "var DATA = " + JSON.stringify(DATA, null, 2) + ";",
-    );
-    html = html.replace(
-      /var LABELS = {[\s\S]*?};/,
-      "var LABELS = " + JSON.stringify(window.LABELS, null, 2) + ";",
-    );
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const dataContent =
+      "// ═══════════════════════════════════════════════════════════\n" +
+      "//  data.js — فایل داده‌های آلبوم\n" +
+      "//  این فایل توسط ادمین به‌روزرسانی می‌شود و نباید دستی ویرایش شود\n" +
+      "// ═══════════════════════════════════════════════════════════\n\n" +
+      "var DATA = " + JSON.stringify(DATA, null, 2) + ";\n\n" +
+      "var LABELS = " + JSON.stringify(window.LABELS, null, 2) + ";\n";
+
+    const blob = new Blob([dataContent], { type: "application/javascript;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "index.html";
+    a.download = "data.js";
     a.click();
     URL.revokeObjectURL(url);
   }
