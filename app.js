@@ -1,27 +1,361 @@
-/* ════════ ADMIN PANEL ════════ */
+/* ═══════════════════════════════════════════════════════════
+   app.js — نسخه کاملاً پویا و متصل به فایربیس (حذف کامل data.js)
+   شامل تمام بخش‌های گالری، سبد خرید، سفارشات و پنل مدیریت ادمین
+   ═══════════════════════════════════════════════════════════ */
+
+// تعریف متغیرهای سراسری به صورت پیش‌فرض خالی برای جلوگیری از خطای رندر اولیه
+window.DATA = {};
+
+// ══════════════════════════════════════════════════════
+// ۱. لود آنی و زنده داده‌ها از فایربیس به محض باز شدن سایت
+// ══════════════════════════════════════════════════════
+if (window.db) {
+  // استفاده از .on باعث می‌شود هر تغییری در ادمین، بلافاصله بدون رفرش در صفحه مشتری اعمال شود
+  window.db.ref("siteData/DATA").on("value", (snapshot) => {
+    const remoteData = snapshot.val();
+    if (remoteData) {
+      window.DATA = remoteData;
+      console.log("✅ داده‌ها با موفقیت از فایربیس دریافت و بروزرسانی شدند.");
+
+      // اجرای توابع اصلی سایت پس از دریافت داده‌ها
+      initApp();
+      if (typeof refreshAllSelectors === "function") refreshAllSelectors();
+    } else {
+      console.warn("⚠️ هیچ داده‌ای در فایربیس یافت نشد. دیتابیس خالی است.");
+    }
+  });
+} else {
+  console.error(
+    "❌ فایربیس لود نشده است! لطفاً تنظیمات تگ اسکریپت فایربیس را در index.html بررسی کنید.",
+  );
+}
+
+function initApp() {
+  createCategoryTabs();
+  // لود اولیه روی اولین دسته‌بندی موجود
+  const firstCat = Object.keys(window.DATA)[0];
+  if (firstCat) {
+    switchCategory(firstCat);
+  }
+  updateCartUI();
+}
+
+/* ════════ CLIENT SIDE GALLERY & CART (کدهای اصلی سایت شما) ════════ */
+
+// ایجاد تب‌های دسته‌بندی در بالای سایت
+function createCategoryTabs() {
+  const container = document.getElementById("categoryTabs");
+  if (!container) return;
+  container.innerHTML = "";
+
+  Object.keys(window.DATA).forEach((key) => {
+    const cat = window.DATA[key];
+    const btn = document.createElement("button");
+    btn.className = "tab-btn";
+    btn.setAttribute("data-category", key);
+    btn.textContent = cat.label || key;
+    btn.addEventListener("click", () => switchCategory(key));
+    container.appendChild(btn);
+  });
+}
+
+// سوئیچ بین دسته‌بندی‌ها
+function switchCategory(catKey) {
+  const tabs = document.querySelectorAll(".tab-btn");
+  tabs.forEach((t) => {
+    if (t.getAttribute("data-category") === catKey) {
+      t.classList.add("active");
+    } else {
+      t.classList.remove("active");
+    }
+  });
+
+  const grid = document.getElementById("photoGrid");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  const catData = window.DATA[catKey];
+  if (!catData || !catData.photos || catData.photos.length === 0) {
+    grid.innerHTML =
+      '<p class="no-photos">هیچ عکسی در این مناسبت وجود ندارد.</p>';
+    return;
+  }
+
+  catData.photos.forEach((photo) => {
+    const card = document.createElement("div");
+    card.className = "photo-card";
+
+    // افکت سه‌بعدی حرکت ماوس روی کارت‌ها
+    card.addEventListener("mousemove", (e) => {
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const xc = rect.width / 2;
+      const yc = rect.height / 2;
+      const angleX = (yc - y) / 10;
+      const angleY = (x - xc) / 10;
+      card.style.transform = `perspective(600px) rotateX(${angleX}deg) rotateY(${angleY}deg) scale(1.02)`;
+    });
+
+    card.addEventListener("mouseleave", () => {
+      card.style.transform =
+        "perspective(600px) rotateX(0deg) rotateY(0deg) scale(1)";
+    });
+
+    const imgWrapper = document.createElement("div");
+    imgWrapper.className = "img-wrapper";
+
+    const img = document.createElement("img");
+    img.src = photo.src;
+    img.alt = photo.title || "";
+    img.loading = "lazy";
+
+    // باز کردن لایت‌باکس با کلیک روی عکس
+    img.addEventListener("click", () =>
+      openLightbox(photo.src, photo.title || ""),
+    );
+
+    imgWrapper.appendChild(img);
+    card.appendChild(imgWrapper);
+
+    // بخش عنوان و دکمه انتخاب عکس
+    const info = document.createElement("div");
+    info.className = "photo-info";
+
+    const title = document.createElement("h3");
+    title.className = "photo-title";
+    title.textContent = photo.title || "بدون عنوان";
+    info.appendChild(title);
+
+    const selectBtn = document.createElement("button");
+    const inCart = cartContains(photo.src);
+    selectBtn.className = inCart ? "select-btn selected" : "select-btn";
+    selectBtn.innerHTML = inCart
+      ? '<span class="icon">✓</span> انتخاب شده'
+      : '<span class="icon">+</span> انتخاب عکس';
+
+    selectBtn.addEventListener("click", () => {
+      toggleCart(photo);
+      const nowIn = cartContains(photo.src);
+      selectBtn.className = nowIn ? "select-btn selected" : "select-btn";
+      selectBtn.innerHTML = nowIn
+        ? '<span class="icon">✓</span> انتخاب شده'
+        : '<span class="icon">+</span> انتخاب عکس';
+    });
+
+    info.appendChild(selectBtn);
+    card.appendChild(info);
+    grid.appendChild(card);
+  });
+}
+
+// ── Lightbox Logic ──
+let currentLightboxImg = "";
+function openLightbox(src, title) {
+  currentLightboxImg = src;
+  const lb = document.getElementById("lightbox");
+  const lbImg = document.getElementById("lightboxImg");
+  const lbTitle = document.getElementById("lightboxTitle");
+  if (!lb || !lbImg) return;
+
+  lbImg.src = src;
+  if (lbTitle) lbTitle.textContent = title;
+  lb.classList.add("active");
+
+  const lbSelectBtn = document.getElementById("lightboxSelectBtn");
+  if (lbSelectBtn) {
+    const inCart = cartContains(src);
+    lbSelectBtn.className = inCart
+      ? "lightbox-select-btn selected"
+      : "lightbox-select-btn";
+    lbSelectBtn.textContent = inCart
+      ? "✓ عکس انتخاب شده است"
+      : "+ انتخاب این عکس";
+  }
+}
+
+window.closeLightbox = function () {
+  const lb = document.getElementById("lightbox");
+  if (lb) lb.classList.remove("active");
+};
+
+window.toggleLightboxSelect = function () {
+  if (!currentLightboxImg) return;
+  let foundPhoto = null;
+
+  Object.keys(window.DATA).forEach((catKey) => {
+    const p = window.DATA[catKey].photos?.find(
+      (x) => x.src === currentLightboxImg,
+    );
+    if (p) foundPhoto = p;
+  });
+
+  if (!foundPhoto) {
+    foundPhoto = { src: currentLightboxImg, title: "" };
+  }
+
+  toggleCart(foundPhoto);
+  const lbSelectBtn = document.getElementById("lightboxSelectBtn");
+  if (lbSelectBtn) {
+    const inCart = cartContains(currentLightboxImg);
+    lbSelectBtn.className = inCart
+      ? "lightbox-select-btn selected"
+      : "lightbox-select-btn";
+    lbSelectBtn.textContent = inCart
+      ? "✓ عکس انتخاب شده است"
+      : "+ انتخاب این عکس";
+  }
+
+  const activeTab = document.querySelector(".tab-btn.active");
+  if (activeTab) {
+    switchCategory(activeTab.getAttribute("data-category"));
+  }
+};
+
+// ── Cart Storage Logic (LocalStorage) ──
+function getCart() {
+  try {
+    return JSON.parse(localStorage.getItem("hatira_cart")) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function setCart(c) {
+  localStorage.setItem("hatira_cart", JSON.stringify(c));
+  updateCartUI();
+}
+
+function cartContains(src) {
+  return getCart().some((x) => x.src === src);
+}
+
+function toggleCart(photo) {
+  let c = getCart();
+  const idx = c.findIndex((x) => x.src === photo.src);
+  if (idx > -1) {
+    c.splice(idx, 1);
+  } else {
+    c.push(photo);
+  }
+  setCart(c);
+}
+
+function updateCartUI() {
+  const c = getCart();
+  const badge = document.getElementById("cartBadge");
+  const countEl = document.getElementById("selectedCount");
+  if (badge) badge.textContent = c.length;
+  if (countEl) countEl.textContent = c.length;
+
+  const list = document.getElementById("cartItemsList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  if (c.length === 0) {
+    list.innerHTML = '<p class="empty-cart-msg">هیچ عکسی انتخاب نشده است.</p>';
+    return;
+  }
+
+  c.forEach((item, index) => {
+    const div = document.createElement("div");
+    div.className = "cart-item-row";
+    div.innerHTML = `
+      <img src="${item.src}" alt="">
+      <span class="cart-item-title">${item.title || "بدون عنوان"}</span>
+      <button class="cart-item-remove" data-idx="${index}">✕</button>
+    `;
+    list.appendChild(div);
+  });
+
+  list.querySelectorAll(".cart-item-remove").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const cart = getCart();
+      cart.splice(idx, 1);
+      setCart(cart);
+      const activeTab = document.querySelector(".tab-btn.active");
+      if (activeTab) switchCategory(activeTab.getAttribute("data-category"));
+    });
+  });
+}
+
+window.toggleCartModal = function (show) {
+  const modal = document.getElementById("cartModal");
+  if (!modal) return;
+  if (show) {
+    updateCartUI();
+    modal.classList.add("active");
+  } else {
+    modal.classList.remove("active");
+  }
+};
+
+window.clearCart = function () {
+  if (getCart().length === 0) return;
+  if (!confirm("آیا از حذف تمام عکس‌های انتخاب‌شده مطمئن هستید؟")) return;
+  setCart([]);
+  const activeTab = document.querySelector(".tab-btn.active");
+  if (activeTab) switchCategory(activeTab.getAttribute("data-category"));
+};
+
+// ── ثبت سفارش و پیام تلگرام/واتس‌اپ ──
+window.submitOrderForm = function (e) {
+  e.preventDefault();
+  const cart = getCart();
+  if (cart.length === 0) {
+    alert("سبد خرید شما خالی است!");
+    return;
+  }
+
+  const name = document.getElementById("customerName").value.trim();
+  const phone = document.getElementById("customerPhone").value.trim();
+  const notes = document.getElementById("customerNotes").value.trim();
+
+  if (!name || !phone) {
+    alert("لطفاً نام و شماره تماس خود را وارد کنید.");
+    return;
+  }
+
+  let msg = `📸 *سفارش جدید آلبوم خاطرات*\n\n`;
+  msg += `👤 *مشتری:* ${name}\n`;
+  msg += `📞 *تلفن:* ${phone}\n`;
+  if (notes) msg += `📝 *توضیحات:* ${notes}\n`;
+  msg += `\n🖼 *عکس‌های انتخاب شده (${cart.length} عدد):*\n`;
+
+  cart.forEach((item, i) => {
+    msg += `${i + 1}. ${item.title || "بدون عنوان"}\n🔗 ${item.src}\n\n`;
+  });
+
+  const encoded = encodeURIComponent(msg);
+  // ارسال به واتس‌اپ پیش‌فرض
+  const whatsappUrl = `https://wa.me/905550000000?text=${encoded}`;
+
+  localStorage.removeItem("hatira_cart");
+  window.toggleCartModal(false);
+  updateCartUI();
+  const activeTab = document.querySelector(".tab-btn.active");
+  if (activeTab) switchCategory(activeTab.getAttribute("data-category"));
+
+  window.open(whatsappUrl, "_blank");
+};
+
+/* ═══════════════════════════════════════════════════════════
+   ADMIN PANEL LOGIC (کدهای پنل مدیریت و هماهنگ‌سازی با فایربیس)
+   ═══════════════════════════════════════════════════════════ */
 (function () {
-  // ══════════════════════════════════════════════════════
-  //  آدرس بک‌اند جنگو
-  // ══════════════════════════════════════════════════════
-  // const API_BASE = "http://127.0.0.1:8000/api";
-  const API_BASE = "/api";
-  // ══════════════════════════════════════════════════════
-
-  // تنظیمات کلودینری — بعد از لاگین ادمین از بک‌اند لود می‌شود
+  const API_BASE = "https://fotoalbum-api.YOUR-SUBDOMAIN.workers.dev/api";
   let _cloudinaryConfig = null;
-
   let apQueue = [];
   let pwdTargetType = "";
 
-  // خواندن تنظیمات کلودینری (از حافظه داخلی، پس از fetch)
   function cfg(k) {
     if (_cloudinaryConfig && _cloudinaryConfig[k] !== undefined)
       return _cloudinaryConfig[k];
     return "";
   }
 
-  // ══════════ System Login (از بک‌اند) ══════════
-
+  // ورود به سیستم
   window.doSystemLogin = async function () {
     const u = document.getElementById("lgUser").value.trim();
     const p = document.getElementById("lgPass").value;
@@ -35,73 +369,22 @@
         body: JSON.stringify({ username: u, password: p }),
       });
       const data = await res.json();
-      if (data.ok) {
-        document.getElementById("initialLoginModal").style.display = "none";
-        sessionStorage.setItem("initialLoggedIn", "true");
-      } else {
-        errEl.textContent = data.error || "نام کاربری یا رمز اشتباه است";
+      if (!res.ok || !data.ok) {
+        errEl.textContent = data.error || "خطا در ورود به سیستم";
+        return;
       }
-    } catch {
-      errEl.textContent = "خطا در اتصال به سرور";
+      document.getElementById("loginSystemBlock").style.display = "none";
+      document.getElementById("loginAdminBlock").style.display = "block";
+    } catch (e) {
+      errEl.textContent = "خطا در ارتباط با سرور";
     }
   };
 
-  document.addEventListener("DOMContentLoaded", function () {
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    if (progressLabel) progressLabel.textContent = "";
-    const statusEl = document.getElementById("statusMessage");
-    if (statusEl) statusEl.textContent = "";
-
-    const isLogged = sessionStorage.getItem("initialLoggedIn");
-    const systemModal = document.getElementById("initialLoginModal");
-    if (systemModal) {
-      if (isLogged === "true") {
-        systemModal.style.display = "none";
-      } else {
-        systemModal.style.setProperty("display", "flex", "important");
-      }
-    }
-
-    const myToast = document.getElementById("apToast");
-    if (myToast) myToast.style.display = "none";
-  });
-
-  // ══════════ Admin Panel Open/Close ══════════
-  //--==== جهت تست
-
-  window.openAdmin = function () {
-    // اگر لاگین اولیه انجام نشده، modal ورود را نشان بده نه پنل ادمین
-    if (sessionStorage.getItem("initialLoggedIn") !== "true") {
-      const systemModal = document.getElementById("initialLoginModal");
-      if (systemModal)
-        systemModal.style.setProperty("display", "flex", "important");
-      return;
-    }
-
-    document.getElementById("adUser").value = "";
-    document.getElementById("adPass").value = "";
-    document.getElementById("adErr").textContent = "";
-
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    if (progressLabel) progressLabel.textContent = "";
-    const statusEl = document.getElementById("statusMessage");
-    if (statusEl) statusEl.textContent = "";
-
-    const loginCard = document.getElementById("loginCard");
-    loginCard.style.display = "block";
-    loginCard.style.position = "fixed";
-    loginCard.style.top = "50%";
-    loginCard.style.left = "50%";
-    loginCard.style.transform = "translate(-50%, -50%)";
-    loginCard.style.zIndex = "10000";
-
-    document.getElementById("adminPanel").style.display = "none";
-  };
-
+  // ورود ادمین
   window.doAdminLogin = async function () {
-    const u = document.getElementById("adUser").value.trim();
-    const p = document.getElementById("adPass").value;
-    const errEl = document.getElementById("adErr");
+    const u = document.getElementById("lgAdminUser").value.trim();
+    const p = document.getElementById("lgAdminPass").value;
+    const errEl = document.getElementById("lgAdminErr");
     errEl.textContent = "";
 
     try {
@@ -111,675 +394,275 @@
         body: JSON.stringify({ username: u, password: p }),
       });
       const data = await res.json();
-      if (!data.ok) {
-        errEl.textContent = data.error || "نام کاربری یا رمز اشتباه است";
+      if (!res.ok || !data.ok) {
+        errEl.textContent = data.error || "رمز ادمین اشتباه است";
         return;
       }
-
-      // لود کلیدهای کلودینری از بک‌اند
-      const cfgRes = await fetch(`${API_BASE}/config/cloudinary/`);
-      _cloudinaryConfig = await cfgRes.json();
-
-      document.getElementById("loginCard").style.display = "none";
-
-      const adminPanel = document.getElementById("adminPanel");
-      adminPanel.style.display = "flex";
-      adminPanel.style.flexDirection = "column";
-      adminPanel.style.position = "fixed";
-      adminPanel.style.top = "50%";
-      adminPanel.style.left = "50%";
-      adminPanel.style.transform = "translate(-50%, -50%)";
-      adminPanel.style.margin = "0";
-      adminPanel.style.zIndex = "10000";
-      adminPanel.style.background = "#fff";
-      adminPanel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.3)";
-      adminPanel.style.maxHeight = "85vh";
-      adminPanel.style.width = "90%";
-      adminPanel.style.maxWidth = "780px";
-      adminPanel.style.borderRadius = "12px";
-
-      initAdminPanel();
-    } catch {
-      errEl.textContent = "خطا در اتصال به سرور";
+      await fetchCloudinaryConfig();
+      document.getElementById("adminAuthContainer").style.display = "none";
+      document.getElementById("adminMainContainer").style.display = "block";
+      refreshAllSelectors();
+    } catch (e) {
+      errEl.textContent = "خطا در تایید رمز ادمین";
     }
   };
 
-  window.closeAdmin = function () {
-    document.getElementById("adminPanel").style.display = "none";
-    document.getElementById("loginCard").style.display = "none";
-
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    if (progressLabel) progressLabel.textContent = "";
-    const statusEl = document.getElementById("statusMessage");
-    if (statusEl) statusEl.textContent = "";
-
-    apQueue = [];
-    renderAdminPhotoGrid();
-  };
-
-  window.doLogout = function () {
-    document.getElementById("adminPanel").style.display = "none";
-    document.getElementById("loginCard").style.display = "none";
-
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    if (progressLabel) progressLabel.textContent = "";
-    const statusEl = document.getElementById("statusMessage");
-    if (statusEl) statusEl.textContent = "";
-
-    apQueue = [];
-    renderAdminPhotoGrid();
-  };
-
-  function initAdminPanel() {
-    refreshAllSelectors();
-    apQueue = [];
-    renderAdminPhotoGrid();
-
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    if (progressLabel) progressLabel.textContent = "";
-    const statusEl = document.getElementById("statusMessage");
-    if (statusEl) statusEl.textContent = "";
-
-    // نمایش تنظیمات فعلی کلودینری (فقط read-only برای اطمینان)
-    const cnEl = document.getElementById("cfgCloudName");
-    const prEl = document.getElementById("cfgPreset");
-    const keyEl = document.getElementById("cfgApiKey");
-    const secEl = document.getElementById("cfgApiSecret");
-    if (cnEl) cnEl.value = cfg("cloudName");
-    if (prEl) prEl.value = cfg("preset");
-    if (keyEl) keyEl.value = cfg("apiKey");
-    if (secEl) secEl.value = cfg("apiSecret");
-    const cfgStatus = document.getElementById("cfgStatus");
-    if (cfgStatus) cfgStatus.textContent = "";
+  async function fetchCloudinaryConfig() {
+    try {
+      const res = await fetch(`${API_BASE}/config/cloudinary/`);
+      if (res.ok) {
+        _cloudinaryConfig = await res.json();
+      }
+    } catch (e) {
+      console.error("Cloudinary Config Error:", e);
+    }
   }
 
-  // ══════════ Cloudinary Settings (override در صورت نیاز) ══════════
+  // ══════════ تابع همگام‌سازی مستقیم داده‌ها با فایربیس ══════════
+  async function syncDataToFirebase() {
+    const statusEl = document.getElementById("statusMessage");
+    if (statusEl) statusEl.textContent = "⏳ در حال ذخیره در فایربیس...";
 
-  window.saveCloudinarySettings = function () {
-    const cloudName = (
-      document.getElementById("cfgCloudName").value || ""
-    ).trim();
-    const preset = (document.getElementById("cfgPreset").value || "").trim();
-    const apiKey = (document.getElementById("cfgApiKey").value || "").trim();
-    const apiSecret = (
-      document.getElementById("cfgApiSecret").value || ""
-    ).trim();
-
-    if (!cloudName) return showCfgStatus("⚠️ Cloud Name را وارد کنید", "red");
-    if (!preset) return showCfgStatus("⚠️ Upload Preset را وارد کنید", "red");
-
-    setCfg("cloudName", cloudName);
-    setCfg("preset", preset);
-    if (apiKey) setCfg("apiKey", apiKey);
-    if (apiSecret) setCfg("apiSecret", apiSecret);
-
-    showCfgStatus("✅ تنظیمات ذخیره شد", "green");
-  };
-
-  function showCfgStatus(msg, color) {
-    const el = document.getElementById("cfgStatus");
-    if (!el) return;
-    el.textContent = msg;
-    el.style.color = color;
-    setTimeout(() => {
-      if (el.textContent === msg) el.textContent = "";
-    }, 3000);
-  }
-
-  // ══════════ Password Modal ══════════
-
-  window.openPwdModal = function (type) {
-    pwdTargetType = type;
-    document.getElementById("pwdModalTitle").textContent =
-      type === "system"
-        ? "🔐 تغییر رمز ورود به سیستم"
-        : "🔑 تغییر رمز پنل ادمین";
-    document.getElementById("pwdModalDesc").textContent =
-      type === "system"
-        ? "اطلاعات فعلی و جدید را وارد کنید"
-        : "اطلاعات ورود ادمین را وارد کنید";
-    ["pwdNewUser", "pwdCurrentPass", "pwdNewPass", "pwdConfirmPass"].forEach(
-      (id) => {
-        document.getElementById(id).value = "";
-      },
-    );
-    document.getElementById("pwdErr").textContent = "";
-    document.getElementById("pwdChangeOverlay").classList.add("open");
-  };
-
-  window.closePwdModal = function () {
-    document.getElementById("pwdChangeOverlay").classList.remove("open");
-    pwdTargetType = "";
-  };
-
-  window.applyPwdChange = function () {
-    const newUser = document.getElementById("pwdNewUser").value.trim();
-    const currentPass = document.getElementById("pwdCurrentPass").value;
-    const newPass = document.getElementById("pwdNewPass").value;
-    const confirmPass = document.getElementById("pwdConfirmPass").value;
-    const errEl = document.getElementById("pwdErr");
-    errEl.textContent = "";
-
-    if (!newUser) {
-      errEl.textContent = "⚠️ نام کاربری جدید را وارد کنید";
+    if (!window.db) {
+      apToast("❌ خطا: دیتابیس آنلاین فایربیس متصل نیست.");
       return;
     }
-
-    const uKey = pwdTargetType === "system" ? "sysUser" : "adminUser";
-    const pKey = pwdTargetType === "system" ? "sysPass" : "adminPass";
-
-    if (currentPass !== cfg(pKey)) {
-      errEl.textContent = "⚠️ رمز عبور فعلی اشتباه است";
-      return;
-    }
-    if (newPass.length < 6) {
-      errEl.textContent = "⚠️ رمز جدید باید حداقل ۶ کاراکتر باشد";
-      return;
-    }
-    if (newPass !== confirmPass) {
-      errEl.textContent = "⚠️ رمز جدید و تکرار آن مطابقت ندارند";
-      return;
-    }
-
-    setCfg(uKey, newUser);
-    setCfg(pKey, newPass);
-    apToast("✅ اطلاعات ورود با موفقیت تغییر کرد");
-    closePwdModal();
-  };
-
-  document.getElementById("pwdChangeOverlay").addEventListener("click", (e) => {
-    if (e.target === e.currentTarget) closePwdModal();
-  });
-
-  // ══════════ Selectors ══════════
-
-  function refreshAllSelectors() {
-    const savedExtra = localStorage.getItem("persianLabels");
-    if (savedExtra) Object.assign(window.LABELS, JSON.parse(savedExtra));
-
-    ["eventOccasionSelector", "manageOccasionSelector", "selOccasion"].forEach(
-      (id) => {
-        const sel = document.getElementById(id);
-        if (!sel) return;
-        const current = sel.value;
-        const placeholder =
-          id === "selOccasion" ? "— انتخاب مناسبت —" : "انتخاب مناسبت...";
-        sel.innerHTML = `<option value="">${placeholder}</option>`;
-        Object.keys(DATA).forEach((key) => {
-          const opt = document.createElement("option");
-          opt.value = key;
-          opt.textContent = window.LABELS[key] || key;
-          sel.appendChild(opt);
-        });
-        if (current) sel.value = current;
-      },
-    );
-
-    if (typeof window.updateEventSelector === "function")
-      window.updateEventSelector();
-  }
-
-  window.updateEventSelector = function () {
-    const manageOccasionSel = document.getElementById("manageOccasionSelector");
-    const manageEventSel = document.getElementById("manageEventSelector");
-    if (!manageOccasionSel || !manageEventSel) return;
-
-    const occ = manageOccasionSel.value;
-    const currentVal = manageEventSel.value;
-
-    manageEventSel.innerHTML = '<option value="">انتخاب رویداد...</option>';
-    if (!occ || !DATA[occ]) return;
-
-    DATA[occ].forEach(function (group, i) {
-      const o = document.createElement("option");
-      o.value = i;
-      o.textContent = group.label;
-      manageEventSel.appendChild(o);
-    });
-
-    if (
-      currentVal &&
-      manageEventSel.querySelector('option[value="' + currentVal + '"]')
-    ) {
-      manageEventSel.value = currentVal;
-    }
-  };
-
-  // ══════════ Create Occasion / Event ══════════
-
-  window.createNewOccasion = function () {
-    const persianName = document.getElementById("newOccasionName").value.trim();
-    let englishKey = document
-      .getElementById("newOccasionRef")
-      .value.trim()
-      .toLowerCase();
-    if (!persianName) return apToast("نام فارسی را وارد کنید");
-    if (!englishKey)
-      englishKey = persianName.toLowerCase().replace(/[^a-zA-Z0-9]/g, "_");
-    if (DATA[englishKey]) return apToast("این مناسبت وجود دارد");
-    DATA[englishKey] = [];
-    window.LABELS[englishKey] = persianName;
-    window.persianLabels = window.persianLabels || {};
-    window.persianLabels[englishKey] = persianName;
-    localStorage.setItem("persianLabels", JSON.stringify(window.persianLabels));
-    refreshAllSelectors();
-    document.getElementById("newOccasionName").value = "";
-    document.getElementById("newOccasionRef").value = "";
-    apToast(`✅ مناسبت "${persianName}" ایجاد شد`);
-    downloadUpdatedIndex();
-  };
-
-  window.createNewEvent = function () {
-    const occ = document.getElementById("eventOccasionSelector").value;
-    const label = document.getElementById("newEventName").value.trim();
-    if (!occ) return apToast("مناسبت را انتخاب کنید");
-    if (!label) return apToast("نام رویداد را وارد کنید");
-    if (!DATA[occ]) DATA[occ] = [];
-    DATA[occ].push({ label, photos: [] });
-    apToast(`✅ رویداد "${label}" اضافه شد`);
-    document.getElementById("newEventName").value = "";
-    refreshAllSelectors();
-    downloadUpdatedIndex();
-  };
-
-  // ══════════ Fetch Event Photos (دکمه فراخوانی) ══════════
-
-  window.fetchEventPhotos = function () {
-    const occ = document.getElementById("manageOccasionSelector").value;
-    const eventIdx = document.getElementById("manageEventSelector").value;
-    if (!occ) return apToast("⚠️ ابتدا مناسبت را انتخاب کنید");
-    if (eventIdx === "") return apToast("⚠️ ابتدا رویداد را انتخاب کنید");
-
-    const event = DATA[occ][eventIdx];
-    if (!event) return apToast("رویداد پیدا نشد");
-    const photos = event.photos || [];
-
-    // عکس‌های فراخوانی‌شده را به apQueue با نوع existing می‌ریزیم
-    // تا دکمه آپلود بتواند آن‌ها را بدون re-upload انتقال دهد
-    apQueue = photos.map(function (p) {
-      return {
-        id: "ex_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
-        src: p.src,
-        preview: p.src,
-        title: p.title || "",
-        status: "existing", // نوع: فراخوانی‌شده از کلودینری
-        srcOcc: occ,
-        srcEventIdx: eventIdx,
-      };
-    });
-
-    if (apQueue.length === 0) {
-      const grid = document.getElementById("adminPhotoGrid");
-      if (grid)
-        grid.innerHTML =
-          '<p style="color:#a07850;font-size:0.85rem;padding:8px">این رویداد هنوز عکسی ندارد</p>';
-      apToast(`رویداد "${event.label}" — بدون عکس`);
-      return;
-    }
-
-    renderAdminPhotoGrid();
-    apToast(`✅ رویداد "${event.label}" — ${apQueue.length} عکس`);
-  };
-
-  window.updateExistingPhotoTitle = function (
-    occ,
-    eventIdx,
-    photoIdx,
-    newTitle,
-  ) {
-    if (DATA[occ]?.[eventIdx]?.photos?.[photoIdx] !== undefined) {
-      DATA[occ][eventIdx].photos[photoIdx].title = newTitle;
-    }
-  };
-
-  // ══════════ Cloudinary Delete Helper ══════════
-  // returns: "ok" | "skip" | "error"
-  async function cloudinaryDelete(srcUrl) {
-    const cloudName = cfg("cloudName");
-    const apiKey = cfg("apiKey");
-    const apiSecret = cfg("apiSecret");
-    if (!cloudName || !apiKey || !apiSecret) return "skip";
-
-    const match = srcUrl.match(/\/image\/upload\/(?:v\d+\/)?(.+)\.[a-z]+$/i);
-    const publicId = match ? match[1] : null;
-    if (!publicId) return "error";
 
     try {
-      const timestamp = Math.floor(Date.now() / 1000);
-      const strToSign = `public_id=${publicId}&timestamp=${timestamp}${apiSecret}`;
-      const hashBuffer = await crypto.subtle.digest(
-        "SHA-1",
-        new TextEncoder().encode(strToSign),
-      );
-      const signature = Array.from(new Uint8Array(hashBuffer))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-
-      const fd = new FormData();
-      fd.append("public_id", publicId);
-      fd.append("timestamp", timestamp);
-      fd.append("api_key", apiKey);
-      fd.append("signature", signature);
-
-      const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
-        { method: "POST", body: fd },
-      );
-      const result = await res.json();
-      if (result.result === "ok") return "ok";
-      console.warn("Cloudinary delete failed:", publicId, result);
-      return "error";
-    } catch (err) {
-      console.error("Cloudinary delete error:", err);
-      return "error";
+      // بروزرسانی مستقیم درخت داده‌ها در فایربیس
+      await window.db.ref("siteData/DATA").set(window.DATA);
+      apToast("✅ تغییرات با موفقیت در فایربیس ذخیره شد");
+      if (statusEl) statusEl.textContent = "✅ هماهنگ با سرور فایربیس";
+    } catch (error) {
+      console.error("Firebase Update Error:", error);
+      apToast("❌ خطا در هماهنگ‌سازی اطلاعات آنلاین");
+      if (statusEl) statusEl.textContent = "❌ خطای هماهنگ‌سازی";
     }
   }
 
-  window.deleteExistingPhoto = async function (occ, eventIdx, photoIdx) {
-    if (!confirm("این عکس از رویداد و کلودینری حذف شود؟")) return;
-    if (!DATA[occ]?.[eventIdx]) return;
+  // مدیریت انتخابگرهای ادمین
+  window.refreshAllSelectors = function () {
+    const catSel = document.getElementById("apCategorySelect");
+    const viewSel = document.getElementById("apViewCategorySelect");
+    if (!catSel || !viewSel) return;
 
-    const photo = DATA[occ][eventIdx].photos[photoIdx];
-    if (photo) {
-      const r = await cloudinaryDelete(photo.src);
-      if (r === "ok") apToast("🗑 عکس از کلودینری و آلبوم حذف شد");
-      else if (r === "skip")
-        apToast("🗑 عکس از آلبوم حذف شد (API Key/Secret تنظیم نشده)");
-      else apToast("🗑 عکس از آلبوم حذف شد (خطا در کلودینری)");
-    }
+    catSel.innerHTML = "";
+    viewSel.innerHTML = "";
 
-    DATA[occ][eventIdx].photos.splice(photoIdx, 1);
-    window.fetchEventPhotos();
-    downloadUpdatedIndex();
+    Object.keys(window.DATA).forEach((key) => {
+      const lbl = window.DATA[key].label || key;
+
+      const opt1 = document.createElement("option");
+      opt1.value = key;
+      opt1.textContent = lbl;
+      catSel.appendChild(opt1);
+
+      const opt2 = document.createElement("option");
+      opt2.value = key;
+      opt2.textContent = lbl;
+      viewSel.appendChild(opt2);
+    });
+
+    renderAdminPhotos();
   };
 
-  // ══════════ File Queue ══════════
+  // رندر کردن گالری در پنل مدیریت ادمین
+  window.renderAdminPhotos = function () {
+    const grid = document.getElementById("apPhotosGrid");
+    const catKey = document.getElementById("apViewCategorySelect")?.value;
+    if (!grid) return;
+    grid.innerHTML = "";
 
-  window.handleFileSelect = function (e) {
-    const imgs = [...e.target.files].filter((f) => f.type.startsWith("image/"));
-    if (!imgs.length) return apToast("فایل تصویری انتخاب کنید");
-    imgs.forEach((file) => {
-      const id = "q" + Date.now() + Math.random().toString(36).slice(2, 6);
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        apQueue.push({
-          id,
-          file,
-          preview: ev.target.result,
-          title: file.name.replace(/\.[^.]+$/, ""),
-          status: "pending",
-        });
-        renderAdminPhotoGrid();
-      };
-      reader.readAsDataURL(file);
+    if (
+      !catKey ||
+      !window.DATA[catKey] ||
+      !window.DATA[catKey].photos ||
+      window.DATA[catKey].photos.length === 0
+    ) {
+      grid.innerHTML =
+        "<p style='grid-column:1/-1; text-align:center; color:var(--text-muted);'>هیچ عکسی در این دسته‌بندی وجود ندارد.</p>";
+      return;
+    }
+
+    window.DATA[catKey].photos.forEach((photo, idx) => {
+      const item = document.createElement("div");
+      item.className = "apg-item";
+      item.innerHTML = `
+        <img src="${photo.src}" alt="">
+        <input type="text" class="apg-title" value="${photo.title || ""}" placeholder="بدون عنوان" data-idx="${idx}">
+        <button class="apg-del-btn" data-idx="${idx}">✕ حذف</button>
+      `;
+      grid.appendChild(item);
+    });
+
+    // ثبت خودکار تغییر نام تایتل تصویر در فایربیس به محض جابجایی فوکوس
+    grid.querySelectorAll(".apg-title").forEach((inp) => {
+      inp.addEventListener("change", (e) => {
+        const idx = parseInt(e.target.dataset.idx);
+        if (window.DATA[catKey] && window.DATA[catKey].photos[idx]) {
+          window.DATA[catKey].photos[idx].title = e.target.value.trim();
+          syncDataToFirebase();
+        }
+      });
+    });
+
+    grid.querySelectorAll(".apg-del-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const idx = parseInt(e.target.dataset.idx);
+        deleteExistingPhoto(catKey, idx);
+      });
+    });
+  };
+
+  // ایجاد دسته‌بندی جدید
+  window.addNewCategory = function () {
+    const idInp = document.getElementById("newCatId");
+    const titleInp = document.getElementById("newCatTitle");
+    const id = idInp.value.trim().toLowerCase();
+    const title = titleInp.value.trim();
+
+    if (!id || !title) {
+      apToast("لطفاً هم شناسه و هم عنوان را وارد کنید.");
+      return;
+    }
+    if (window.DATA[id]) {
+      apToast("این شناسه مناسبت از قبل وجود دارد.");
+      return;
+    }
+
+    window.DATA[id] = {
+      label: title,
+      photos: [],
+    };
+
+    idInp.value = "";
+    titleInp.value = "";
+    refreshAllSelectors();
+    syncDataToFirebase();
+  };
+
+  function deleteExistingPhoto(catKey, idx) {
+    if (!confirm("آیا از حذف این عکس مطمئن هستید؟")) return;
+    window.DATA[catKey].photos.splice(idx, 1);
+    renderAdminPhotos();
+    syncDataToFirebase();
+  }
+
+  // انتخاب فایل‌ها برای صف آپلود
+  window.handleApFilesSelect = function (e) {
+    const files = Array.from(e.target.files);
+    const queueList = document.getElementById("apQueueList");
+    if (!queueList) return;
+
+    files.forEach((file) => {
+      if (
+        apQueue.some(
+          (q) => q.file.name === file.name && q.file.size === file.size,
+        )
+      )
+        return;
+      const id = "q_" + Math.random().toString(36).substr(2, 9);
+      apQueue.push({ id, file, status: "waiting" });
+
+      const li = document.createElement("div");
+      li.className = "ap-q-item";
+      li.id = id;
+      li.innerHTML = `
+        <span class="ap-q-name">${file.name}</span>
+        <span class="ap-q-status waiting">در انتظار...</span>
+      `;
+      queueList.appendChild(li);
     });
     e.target.value = "";
   };
 
-  function renderAdminPhotoGrid() {
-    const grid = document.getElementById("adminPhotoGrid");
-    if (!grid) return;
-    if (!apQueue.length) {
-      grid.innerHTML = "";
+  // شروع آپلود تصاویر به کلودینری و ثبت همزمان در فایربیس
+  window.startApUploads = async function () {
+    const catKey = document.getElementById("apCategorySelect").value;
+    if (!catKey) {
+      apToast("لطفاً ابتدا یک دسته‌بندی انتخاب کنید.");
       return;
     }
-    grid.innerHTML = apQueue
-      .map((p) => {
-        const s =
-          p.status === "existing"
-            ? '<div class="apg-badge apg-done">✓</div>'
-            : p.status === "done"
-              ? '<div class="apg-badge apg-done">✓</div>'
-              : p.status === "uploading"
-                ? '<div class="apg-badge apg-uploading">↑</div>'
-                : p.status === "error"
-                  ? '<div class="apg-badge apg-error">✗</div>'
-                  : "";
-        return `<div class="apg-item" id="apgitem-${p.id}">${s}<img src="${p.preview}" alt=""><input class="apg-title" type="text" value="${p.title.replace(/"/g, "&quot;")}" placeholder="عنوان عکس" onchange="updatePhotoTitle('${p.id}',this.value)"><button class="apg-del" onclick="removeFromQueue('${p.id}')" title="حذف">🗑</button></div>`;
-      })
-      .join("");
-  }
 
-  window.updatePhotoTitle = (id, title) => {
-    const p = apQueue.find((x) => x.id === id);
-    if (p) p.title = title;
-  };
-  window.removeFromQueue = (id) => {
-    apQueue = apQueue.filter((p) => p.id !== id);
-    renderAdminPhotoGrid();
-  };
-  window.clearPhotoQueue = () => {
-    apQueue = [];
-    renderAdminPhotoGrid();
-    const s = document.getElementById("statusMessage");
-    if (s) s.textContent = "";
-  };
+    const itemsToUpload = apQueue.filter((q) => q.status === "waiting");
+    if (itemsToUpload.length === 0) {
+      apToast("هیچ فایلی برای آپلود در صف نیست.");
+      return;
+    }
 
-  // ══════════ Upload to Cloudinary ══════════
+    for (let item of itemsToUpload) {
+      const row = document.getElementById(item.id);
+      const statusText = row.querySelector(".ap-q-status");
+      statusText.className = "ap-q-status uploading";
+      statusText.textContent = "در حال آپلود...";
+      item.status = "uploading";
 
-  window.uploadToCloudinary = async function () {
-    const occ = document.getElementById("manageOccasionSelector")?.value || "";
-    const eventIdx =
-      document.getElementById("manageEventSelector")?.value ?? "";
+      try {
+        const url = await uploadFileToCloudinary(item.file);
 
-    if (!occ) return apToast("⚠️ ابتدا مناسبت را انتخاب کنید");
-    if (eventIdx === "") return apToast("⚠️ ابتدا رویداد را انتخاب کنید");
+        if (!window.DATA[catKey].photos) {
+          window.DATA[catKey].photos = [];
+        }
 
-    const toProcess = apQueue.filter(
-      (p) => p.status === "pending" || p.status === "existing",
-    );
-    if (!toProcess.length) return apToast("هیچ عکسی در صف وجود ندارد");
+        window.DATA[catKey].photos.push({
+          src: url,
+          title: item.file.name.split(".")[0],
+        });
 
-    // برای existing‌ها بررسی کن که مقصد با مبدأ فرق داشته باشه
-    const existingPhotos = toProcess.filter((p) => p.status === "existing");
-    const pendingPhotos = toProcess.filter((p) => p.status === "pending");
-
-    if (existingPhotos.length > 0) {
-      // همه existing‌ها باید از یک رویداد مبدأ باشند
-      const srcOcc = existingPhotos[0].srcOcc;
-      const srcEventIdx = existingPhotos[0].srcEventIdx;
-      if (srcOcc === occ && String(srcEventIdx) === String(eventIdx)) {
-        return apToast(
-          "⚠️ مبدأ و مقصد یکسان است — مناسبت/رویداد مقصد را تغییر دهید",
-        );
+        statusText.className = "ap-q-status success";
+        statusText.textContent = "موفقیت‌آمیز";
+        item.status = "success";
+      } catch (err) {
+        statusText.className = "ap-q-status error";
+        statusText.textContent = "خطا!";
+        item.status = "failed";
       }
     }
 
-    // برای pending‌ها کلودینری لازم است
-    if (pendingPhotos.length > 0) {
-      const cloudName = cfg("cloudName");
-      const preset = cfg("preset");
-      if (!cloudName) return apToast("Cloud Name تنظیم نشده");
-      if (!preset) return apToast("Upload Preset تنظیم نشده");
-    }
-
-    const progressWrap = document.getElementById("uploadProgressWrap");
-    const progressBar = document.getElementById("uploadProgressBar");
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    const statusEl = document.getElementById("statusMessage");
-
-    progressWrap.style.display = "block";
-    progressBar.style.width = "0%";
-    let done = 0,
-      total = toProcess.length;
-    let successCount = 0,
-      errorCount = 0;
-
-    for (const photo of toProcess) {
-      // ── حالت ۱: عکس فراخوانی‌شده — فقط لینک منتقل می‌شود ──
-      if (photo.status === "existing") {
-        progressLabel.textContent = `انتقال ${done + 1} از ${total}: ${photo.title}`;
-
-        const srcOcc = photo.srcOcc;
-        const srcEventIdx = photo.srcEventIdx;
-        const srcArr = DATA[srcOcc]?.[srcEventIdx]?.photos;
-
-        // ثبت در مقصد
-        if (!DATA[occ][eventIdx].photos) DATA[occ][eventIdx].photos = [];
-        DATA[occ][eventIdx].photos.push({ src: photo.src, title: photo.title });
-
-        // حذف از مبدأ
-        if (srcArr) {
-          const idx = srcArr.findIndex((x) => x.src === photo.src);
-          if (idx !== -1) srcArr.splice(idx, 1);
-        }
-
-        photo.status = "done";
-        successCount++;
-
-        // ── حالت ۲: عکس جدید — آپلود واقعی به کلودینری ──
-      } else if (photo.status === "pending") {
-        photo.status = "uploading";
-        renderAdminPhotoGrid();
-        progressLabel.textContent = `آپلود ${done + 1} از ${total}: ${photo.title}`;
-        try {
-          const formData = new FormData();
-          formData.append("file", photo.file);
-          formData.append("upload_preset", cfg("preset"));
-          formData.append("context", `caption=${photo.title}`);
-
-          const res = await fetch(
-            `https://api.cloudinary.com/v1_1/${cfg("cloudName")}/image/upload`,
-            { method: "POST", body: formData },
-          );
-          const data = await res.json();
-          if (data.secure_url) {
-            DATA[occ][eventIdx].photos.push({
-              src: data.secure_url,
-              title: photo.title,
-            });
-            photo.status = "done";
-            successCount++;
-          } else {
-            photo.status = "error";
-            errorCount++;
-            console.error("Cloudinary error:", data);
-          }
-        } catch (err) {
-          photo.status = "error";
-          errorCount++;
-          console.error("Upload failed:", err);
-        }
-      }
-
-      done++;
-      progressBar.style.width = Math.round((done / total) * 100) + "%";
-      renderAdminPhotoGrid();
-    }
-
-    const hadExisting = existingPhotos.length > 0;
-    const hadPending = pendingPhotos.length > 0;
-
-    progressLabel.textContent =
-      hadExisting && !hadPending ? "انتقال تمام شد" : "آپلود تمام شد";
-    statusEl.textContent =
-      (hadExisting ? `✅ ${existingPhotos.length} عکس منتقل شد` : "") +
-      (hadPending
-        ? ` ✅ ${pendingPhotos.filter((p) => p.status === "done").length} عکس آپلود شد`
-        : "") +
-      (errorCount ? ` — ❌ ${errorCount} خطا` : "");
-
-    apToast(
-      hadExisting && !hadPending
-        ? `✅ ${successCount} عکس با موفقیت منتقل شد`
-        : `✅ ${successCount} عکس با موفقیت انجام شد`,
-    );
-
-    apQueue = [];
-    renderAdminPhotoGrid();
+    apQueue = apQueue.filter((q) => q.status !== "success");
     setTimeout(() => {
-      progressWrap.style.display = "none";
-    }, 2000);
-    downloadUpdatedIndex();
-  };
+      const queueList = document.getElementById("apQueueList");
+      if (queueList) queueList.innerHTML = "";
+    }, 3000);
 
-  // ══════════ Delete Entire Event + Cloudinary ══════════
-
-  window.deleteEntireEvent = async function () {
-    const occ = document.getElementById("manageOccasionSelector").value;
-    const eventIdx = document.getElementById("manageEventSelector").value;
-    if (!occ) return apToast("مناسبت را انتخاب کنید");
-    if (eventIdx === "") return apToast("رویداد را انتخاب کنید");
-
-    const event = DATA[occ][eventIdx];
-    const label = event.label;
-    const photos = event.photos || [];
-
-    if (
-      !confirm(
-        `رویداد "${label}" و تمام ${photos.length} عکسش از سایت و کلودینری پاک شود؟`,
-      )
-    )
-      return;
-
-    if (photos.length > 0) {
-      apToast(`⏳ در حال حذف ${photos.length} عکس از کلودینری...`);
-      let ok = 0,
-        skipped = 0,
-        failed = 0;
-
-      for (const photo of photos) {
-        const r = await cloudinaryDelete(photo.src);
-        if (r === "ok") ok++;
-        else if (r === "skip") skipped++;
-        else failed++;
-      }
-
-      if (skipped === photos.length)
-        apToast(
-          `🗑 رویداد "${label}" حذف شد (API Key/Secret تنظیم نشده — کلودینری دست‌نخورده)`,
-        );
-      else if (failed > 0)
-        apToast(`⚠️ ${ok} عکس از کلودینری حذف شد — ${failed} با خطا`);
-      else apToast(`✅ ${ok} عکس از کلودینری و رویداد "${label}" حذف شد`);
-    } else {
-      apToast(`🗑 رویداد "${label}" حذف شد`);
-    }
-
-    DATA[occ].splice(eventIdx, 1);
     refreshAllSelectors();
-    downloadUpdatedIndex();
+    syncDataToFirebase();
   };
 
-  // ══════════ Toast ══════════
+  async function uploadFileToCloudinary(file) {
+    const cloudName = cfg("cloudName");
+    const preset = cfg("preset");
+    if (!cloudName || !preset)
+      throw new Error("تنظیمات کلودینری لود نشده است.");
+
+    const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("upload_preset", preset);
+
+    const res = await fetch(url, { method: "POST", body: fd });
+    if (!res.ok) throw new Error("خطای آپلود کلودینری");
+    const data = await res.json();
+    return data.secure_url;
+  }
 
   window.apToast = function (msg) {
     const t = document.getElementById("apToast");
     if (!t) return;
-    t.style.display = "";
     t.textContent = msg;
     t.classList.add("show");
-    clearTimeout(t._tid);
-    t._tid = setTimeout(() => t.classList.remove("show"), 4000);
+    setTimeout(() => t.classList.remove("show"), 3000);
   };
 
-  // ══════════ Download Updated HTML ══════════
+  window.openAdmin = function () {
+    const overlay = document.getElementById("adminOverlay");
+    if (overlay) overlay.style.display = "block";
+  };
 
-  function downloadUpdatedIndex() {
-    const progressLabel = document.getElementById("uploadProgressLabel");
-    if (progressLabel) progressLabel.textContent = "";
-    const statusEl = document.getElementById("statusMessage");
-    if (statusEl) statusEl.textContent = "";
-
-    let html = document.documentElement.outerHTML;
-    html = html.replace(
-      /var DATA = {[\s\S]*?};(?=\s*\n\s*(\/\/|var LABELS|let LABELS))/g,
-      "var DATA = " + JSON.stringify(DATA, null, 2) + ";",
-    );
-    html = html.replace(
-      /var LABELS = {[\s\S]*?};/,
-      "var LABELS = " + JSON.stringify(window.LABELS, null, 2) + ";",
-    );
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "index.html";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // ══════════ Admin Overlay Close ══════════
+  window.closeAdmin = function () {
+    const overlay = document.getElementById("adminOverlay");
+    if (overlay) overlay.style.display = "none";
+  };
 
   const adminOverlay = document.getElementById("adminOverlay");
   if (adminOverlay) {
@@ -789,7 +672,8 @@
   }
 })();
 
-function switchAdminTab(tabName) {
+// تغییر تب‌ها در بخش پنل مدیریت ادمین
+window.switchAdminTab = function (tabName) {
   const uploadsContent = document.getElementById("tab-uploads");
   const settingsContent = document.getElementById("tab-settings");
   const btnUploads = document.getElementById("btnTabUploads");
@@ -822,4 +706,4 @@ function switchAdminTab(tabName) {
     btnUploads.style.color = "var(--text-muted)";
     btnUploads.style.fontWeight = "500";
   }
-}
+};

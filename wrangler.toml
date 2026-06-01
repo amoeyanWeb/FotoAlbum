@@ -1,0 +1,14 @@
+# ═══════════════════════════════════════════════════════════
+#  wrangler.toml — تنظیمات Cloudflare Worker
+# ═══════════════════════════════════════════════════════════
+
+name = "fotoalbum-api"
+main = "functions/api.js"
+compatibility_date = "2024-01-01"
+
+# متغیرهای محیطی (مقادیر واقعی را در Dashboard وارد کن، نه اینجا)
+# [vars]
+# SYSTEM_USERNAME = "..."   ← در Cloudflare Dashboard > Worker > Settings > Variables
+
+# Routes — این Worker فقط مسیرهای /api/* را handle می‌کند
+# بعد از deploy، آدرس Worker را در app.js جایگزین "/api" کن
